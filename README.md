@@ -15,6 +15,19 @@ To run the simulator, use the following command:
 
 See [Commands](COMMANDS.md) for a list of commands.
 
+## Project Highlights
+
+- Extended the original **single-cycle RISC-V simulator** to a **multi-stage pipelined simulator**.
+- Implemented multiple pipeline configurations including:
+  - Basic pipelining
+  - Hazard detection
+  - Data forwarding
+  - Static and dynamic branch prediction
+- Added support for **instruction scheduling** and **cycle-accurate debugging**.
+- Designed the simulator to be configurable across different execution modes at runtime.
+
+
+
 ## License
 This project is licensed under the MIT License. See the [LICENSE](LICENSE) file for more details.
 

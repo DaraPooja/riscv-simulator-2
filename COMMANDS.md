@@ -43,3 +43,38 @@
   - `Memory`
     - `memory_size` (unsigned int) : bytes
     - `memory_block_size` (unsigned int) : bytes  
+
+---
+
+## Startup Options (VM Mode and Debugging)
+
+The following options are provided **at VM startup** to configure processor mode, debugging, and instruction scheduling.
+
+- `--mode <value>`
+  - Selects the processor execution mode.
+
+  | Value | Description |
+  |------:|-------------|
+  | `0` | Single-cycle processor |
+  | `1` | Basic pipelined processor |
+  | `2` | Pipelined processor with hazard detection |
+  | `3` | Pipelined processor with forwarding |
+  | `4` | Pipelined processor with static branch prediction |
+  | `5` | Pipelined processor with dynamic 1-bit branch prediction |
+  | `6` | Pipelined processor with dynamic 2-bit branch prediction |
+  | `7` | Pipelined processor with dynamic 2-bit branch prediction + BTB |
+
+  - Invalid mode values will result in an error.
+
+- `--debug`
+  - Enables debug mode.
+  - Logs cycle-by-cycle pipeline execution details to `pipeline_debug.log`.
+
+- `--schedule`
+  - Enables instruction scheduling (basic-block optimization).
+  - Helps reduce pipeline stalls in supported pipelined modes.
+
+### Example Usage
+
+```bash
+./riscv_simulator --mode 6 --debug --schedule
