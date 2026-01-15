@@ -132,7 +132,7 @@
      uint64_t address = 0;
  
      if (is_line) {
-         // 🔹 Convert line number to instruction number
+         //  Convert line number to instruction number
          auto it = program_.line_number_instruction_number_mapping.find(val);
          if (it == program_.line_number_instruction_number_mapping.end()) {
              std::cerr << "Invalid line number: " << val << std::endl;
@@ -141,7 +141,7 @@
  
          unsigned int instr_num = it->second;
  
-         // 🔹 Each instruction is 4 bytes wide
+         // Each instruction is 4 bytes wide
          address = instr_num * 4;
      } else {
          // Direct address given

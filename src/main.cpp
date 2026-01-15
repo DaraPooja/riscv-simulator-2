@@ -4,6 +4,7 @@
 #include "globals.h"
 #include "vm/rvss/rvss_vm.h"
 #include "vm/rvss/rvss_pipeline_vm.h"
+#include "vm/rvss/instruction_scheduler.h"
 #include "vm_runner.h"
 #include "command_handler.h"
 #include "config.h"
@@ -14,8 +15,15 @@
 #include <regex>
 
 int main(int argc, char *argv[]) {
-    int vm_mode = 0;  // default mode: 0=single-cycle, 1=pipeline
+    int vm_mode = 0;  // default mode: 0=single-cycle, 1=pipeline, 2=pipeline+hazard
     bool dump_regs = false;
+    bool enable_schedule = false; // for instruction scheduling
+
+
+    setupVmStateDirectory();
+    AssembledProgram program;
+    RVSSVM vm;
+    RVSSPipelineVM pipeline_vm;
 
     if (argc <= 1) {
         std::cerr << "No arguments provided. Use --help for usage information.\n";
@@ -34,8 +42,10 @@ int main(int argc, char *argv[]) {
                       << "  --verbose-errors     Enable verbose error printing\n"
                       << "  --start-vm           Start the VM with the default program\n"
                       << "  --start-vm --vm-as-backend  Start VM in backend mode\n"
-                      << "  --mode <0|1>         Set VM mode (0=single-cycle, 1=pipeline)\n"
-                      << "  --dump-regs          Dump registers after execution\n";
+                      << "  --mode <0|1|2>       Set VM mode (0=single-cycle, 1=basic pipeline, 2=pipeline+hazard)\n"
+                      << "  --dump-regs          Dump registers after execution\n"
+                      << "  --debug              Enable debug logging to pipeline_debug.log\n"
+                      << "  --show-regs          Show register values after execution\n";
             return 0;
 
         } else if (arg == "--assemble") {
@@ -81,23 +91,84 @@ int main(int argc, char *argv[]) {
             break;
 
         } else if (arg == "--mode") {
-           if (++i >= argc) {
-               std::cerr << "Error: No mode specified.\n";
-               return 1;
-           }
-           try {
-               vm_mode = std::stoi(argv[i]);
-               if (vm_mode != 0 && vm_mode != 1) {
-                   std::cerr << "Error: Invalid mode. Use 0 (single-cycle) or 1 (pipeline).\n";
-                   return 1;
-               }
-               std::cout << "VM mode set to: " << (vm_mode == 0 ? "single-cycle" : "pipeline") << '\n';
-           } catch (...) {
-               std::cerr << "Error: Invalid mode value.\n";
-               return 1;
-           }
-           
-        } else if (arg == "--dump-regs") {
+   if (++i >= argc) {
+       std::cerr << "Error: No mode specified.\n";
+       return 1;
+   }
+   try {
+       vm_mode = std::stoi(argv[i]);
+       if (vm_mode < 0 || vm_mode > 7) {
+           std::cerr << "Error: Invalid mode. Use 0–5.\n";
+           return 1;
+       }
+
+       if (vm_mode == 2) {
+    pipeline_vm.enable_hazard_detection_ = true;
+    std::cout << "Hazard detection enabled.\n";
+} else if (vm_mode == 3) {
+    pipeline_vm.enable_hazard_detection_ = true;
+    pipeline_vm.EnableForwarding(true);
+    std::cout << "Forwarding enabled.\n";
+} else if (vm_mode == 4) {
+    pipeline_vm.enable_hazard_detection_ = true;
+    pipeline_vm.EnableForwarding(true);
+    pipeline_vm.enable_branch_prediction_ = true;
+    pipeline_vm.SetBranchPredictor(BranchPredictor::BACKWARD_TAKEN_FORWARD_NOT_TAKEN);
+    std::cout << "Static branch prediction enabled (Backward Taken / Forward Not Taken).\n";
+} else if (vm_mode == 5) {
+    pipeline_vm.enable_hazard_detection_ = true;
+    pipeline_vm.EnableForwarding(true);
+    pipeline_vm.enable_branch_prediction_ = true;
+    // Set 1-bit predictor with 1024 entries (we can change size as we like)
+    pipeline_vm.SetBranchPredictor(BranchPredictor::ONE_BIT, 1024);
+    std::cout << "Dynamic 1-bit branch prediction enabled (table=1024 entries).\n";
+}else if (vm_mode == 6) {
+    pipeline_vm.enable_hazard_detection_ = true;
+    pipeline_vm.EnableForwarding(true);
+    pipeline_vm.enable_branch_prediction_ = true;
+    pipeline_vm.enable_btb_ = false; // ensure BTB disabled
+    pipeline_vm.SetBranchPredictor(BranchPredictor::TWO_BIT, 1024);
+    std::cout << "Dynamic 2-bit branch prediction enabled (table=1024 entries).\n";
+}
+else if (vm_mode == 7) {
+    pipeline_vm.enable_hazard_detection_ = true;
+    pipeline_vm.EnableForwarding(true);
+    pipeline_vm.enable_branch_prediction_ = true;
+    pipeline_vm.enable_btb_ = true; // ensure BTB enabled
+    pipeline_vm.SetBranchPredictor(BranchPredictor::TWO_BIT, 1024);
+    std::cout << "Dynamic 2-bit branch prediction + Branch Target Buffer (BTB) enabled.\n";
+}
+
+
+std::cout << "VM mode set to: "
+          << (vm_mode == 0 ? "single-cycle" :
+             (vm_mode == 1 ? "basic pipeline" :
+             (vm_mode == 2 ? "pipeline with hazard detection" :
+             (vm_mode == 3 ? "pipeline with forwarding" :
+             (vm_mode == 4 ? "pipeline with static branch prediction" :
+             (vm_mode == 5 ? "pipeline with dynamic 1-bit branch prediction" :
+             (vm_mode == 6 ? "pipeline with dynamic 2-bit branch prediction" :
+                              "pipeline with dynamic 2-bit branch prediction + BTB")))))))
+                 << std::endl;
+
+
+   } catch (...) {
+       std::cerr << "Error: Invalid mode value.\n";
+       return 1;
+   }
+}else if (arg == "--schedule") {
+    enable_schedule = true;
+    pipeline_vm.enable_instruction_scheduling_ = true;
+    std::cout << "Instruction scheduling (basic-block optimization) enabled.\n";
+}else if (arg == "--debug") {
+    pipeline_vm.debug_mode_ = true;
+    std::cout << "Debug mode enabled.Cycle details will be logged to pipeline_debug.log\n";
+    
+} else if (arg == "--show-regs") {
+    dump_regs = true;
+    std::cout << "Will show registers after execution.\n";
+}
+else if (arg == "--dump-regs") {
             dump_regs = true;
             std::cout << "Register dump enabled.\n";
             
@@ -107,14 +178,19 @@ int main(int argc, char *argv[]) {
         }
     }
 
-    setupVmStateDirectory();
+    std::cout << "Running in "
+    << (vm_mode == 0 ? "single-cycle" :
+       (vm_mode == 1 ? "basic pipeline" :
+       (vm_mode == 2 ? "pipeline with hazard detection" :
+       (vm_mode == 3 ? "pipeline with forwarding" :
+       (vm_mode == 4 ? "pipeline with static branch prediction" :
+       (vm_mode == 5 ? "pipeline with dynamic 1-bit branch prediction" :
+       (vm_mode == 6 ? "pipeline with dynamic 2-bit branch prediction" :
+                       "pipeline with dynamic 2-bit branch prediction + BTB")))))))
+    << " mode" << std::endl;
 
-    AssembledProgram program;
-    RVSSVM vm;
-    RVSSPipelineVM pipeline_vm;
 
-    std::cout << "VM_STARTED" << std::endl;
-    std::cout << "Running in " << (vm_mode == 0 ? "single-cycle" : "pipeline") << " mode" << std::endl;
+
 
     std::thread vm_thread;
     bool vm_running = false;
@@ -167,6 +243,7 @@ int main(int argc, char *argv[]) {
                     vm.output_status_ = "VM_PARSE_SUCCESS";
                     vm.DumpState(globals::vm_state_dump_file_path);
                 } else {
+                    // LoadProgram will handle scheduling if enable_instruction_scheduling_ is true
                     pipeline_vm.LoadProgram(program);
                     pipeline_vm.output_status_ = "VM_PARSE_SUCCESS";
                     pipeline_vm.DumpState(globals::vm_state_dump_file_path);
@@ -186,10 +263,9 @@ int main(int argc, char *argv[]) {
                 std::cerr << e.what() << '\n';
                 continue;
             }
-
         } else if (command.type == command_handler::CommandType::RUN) {
             // Check if we're resuming from a breakpoint in pipeline mode
-            if (vm_mode == 1 && pipeline_vm.paused_at_breakpoint_ && !vm_running) {
+            if (vm_mode >= 1 && pipeline_vm.paused_at_breakpoint_ && !vm_running) {
                 // Resume directly without launching new thread
                 std::cout << "Resuming from breakpoint at PC = 0x"
                           << std::hex << pipeline_vm.paused_pc_ << std::dec << std::endl;
@@ -219,8 +295,8 @@ int main(int argc, char *argv[]) {
                     if (vm_mode == 0) {
                         // Single-cycle mode
                         vm.Run();
-                    } else if (vm_mode == 1) {
-                        // Pipeline mode - fresh start
+                    } else {
+                        // Pipeline mode 
                         bool finished = pipeline_vm.RunPipeline();
 
                         if (finished) {
@@ -243,7 +319,7 @@ int main(int argc, char *argv[]) {
             }
 
         } else if (command.type == command_handler::CommandType::DEBUG_RUN) {
-            if (vm_mode == 1) {
+            if (vm_mode >= 1) {
                 std::cout << "DEBUG_RUN not supported in pipeline mode. Use RUN with breakpoints instead." << std::endl;
                 continue;
             }
@@ -264,7 +340,7 @@ int main(int argc, char *argv[]) {
         } else if (command.type == command_handler::CommandType::STEP) {
             if (vm_running) continue;
             
-            if (vm_mode == 1) {
+            if (vm_mode >= 1) {
                 std::cout << "STEP not supported in pipeline mode. Use RUN with breakpoints instead." << std::endl;
                 continue;
             }
@@ -273,7 +349,7 @@ int main(int argc, char *argv[]) {
         } else if (command.type == command_handler::CommandType::UNDO) {
             if (vm_running) continue;
             
-            if (vm_mode == 1) {
+            if (vm_mode >= 1) {
                 std::cout << "UNDO not supported in pipeline mode." << std::endl;
                 continue;
             }
@@ -282,7 +358,7 @@ int main(int argc, char *argv[]) {
         } else if (command.type == command_handler::CommandType::REDO) {
             if (vm_running) continue;
             
-            if (vm_mode == 1) {
+            if (vm_mode >= 1) {
                 std::cout << "REDO not supported in pipeline mode." << std::endl;
                 continue;
             }
@@ -293,6 +369,11 @@ int main(int argc, char *argv[]) {
                 vm.Reset();
             } else {
                 pipeline_vm.Reset();
+                if (vm_mode == 3) {
+                    pipeline_vm.enable_forwarding_ = true;
+                    pipeline_vm.enable_hazard_detection_ = true; 
+                }
+                
             }
 
         } else if (command.type == command_handler::CommandType::EXIT) {

@@ -39,6 +39,25 @@ static std::string decode_fclass(uint16_t res) {
   return output.empty() ? "unknown" : output;
 }
 
+// Helper function to check if a float is infinity
+static bool is_infinity(float f) {
+  uint32_t bits;
+  std::memcpy(&bits, &f, sizeof(float));
+  return (bits & 0x7FFFFFFF) == 0x7F800000;
+}
+
+// Helper function to get canonical NaN
+static constexpr uint32_t CANONICAL_NAN_SP = 0x7FC00000;
+static constexpr uint64_t CANONICAL_NAN_DP = 0x7FF8000000000000;
+
+// Helper function to return canonical NaN as float
+static float get_canonical_nan_float() {
+  uint32_t nan_bits = CANONICAL_NAN_SP;
+  float result;
+  std::memcpy(&result, &nan_bits, sizeof(float));
+  return result;
+}
+
 
 [[nodiscard]] std::pair<uint64_t, bool> Alu::execute(AluOp op, uint64_t a, uint64_t b) {
   switch (op) {
@@ -243,9 +262,14 @@ static std::string decode_fclass(uint16_t res) {
                                                           uint64_t inc,
                                                           uint8_t rm) {
   float a, b, c;
-  std::memcpy(&a, &ina, sizeof(float));
-  std::memcpy(&b, &inb, sizeof(float));
-  std::memcpy(&c, &inc, sizeof(float));
+  uint32_t a_bits = static_cast<uint32_t>(ina & 0xFFFFFFFF);
+  std::memcpy(&a, &a_bits, sizeof(float));
+
+  uint32_t b_bits = static_cast<uint32_t>(inb & 0xFFFFFFFF);
+  std::memcpy(&b, &b_bits, sizeof(float));
+
+  uint32_t c_bits = static_cast<uint32_t>(inc & 0xFFFFFFFF);
+  std::memcpy(&c, &c_bits, sizeof(float));
   float result = 0.0;
 
   uint8_t fcsr = 0;
@@ -523,7 +547,11 @@ static std::string decode_fclass(uint16_t res) {
   std::fesetround(original_rm);
 
   uint32_t result_bits = 0;
-  std::memcpy(&result_bits, &result, sizeof(result));
+  if (std::isnan(result)) {
+    result_bits = CANONICAL_NAN_SP;
+  } else {
+    std::memcpy(&result_bits, &result, sizeof(result));
+  }
   return {static_cast<uint64_t>(result_bits), fcsr};
 }
 
@@ -788,15 +816,31 @@ static std::string decode_fclass(uint16_t res) {
       return {res, fcsr};
     }
     case AluOp::FCVT_D_S: {
-      auto fa = static_cast<float>(ina);
-      result = static_cast<double>(fa);
-      break;
-    }
-    case AluOp::FCVT_S_D: {
-      auto da = static_cast<double>(ina);
-      result = static_cast<float>(da);
-      break;
-    }
+      // Convert single → double
+      uint32_t in_bits = static_cast<uint32_t>(ina & 0xFFFFFFFFu);
+      float f;
+      std::memcpy(&f, &in_bits, sizeof(float));
+      double d = static_cast<double>(f);
+      uint64_t d_bits;
+      std::memcpy(&d_bits, &d, sizeof(double));
+      std::fesetround(original_rm);
+      return {d_bits, false};
+  }
+  
+  case AluOp::FCVT_S_D: {
+      // Convert double → single
+      uint64_t in_bits = static_cast<uint64_t>(ina);
+      double d;
+      std::memcpy(&d, &in_bits, sizeof(double));
+      float f = static_cast<float>(d);
+      uint32_t f_bits;
+      std::memcpy(&f_bits, &f, sizeof(float));
+      uint64_t result_bits = static_cast<uint64_t>(f_bits);
+      std::fesetround(original_rm);
+      return {result_bits, false};
+  }
+  
+
     case AluOp::FMV_D_X: {
       uint64_t double_bits;
       std::memcpy(&double_bits, &ina, sizeof(double));
@@ -822,8 +866,12 @@ static std::string decode_fclass(uint16_t res) {
   std::fesetround(original_rm);
 
   uint64_t result_bits = 0;
-  std::memcpy(&result_bits, &result, sizeof(result));
-  return {result_bits, fcsr};
+  if (std::isnan(result)) {
+    result_bits = CANONICAL_NAN_DP;
+  } else {
+    std::memcpy(&result_bits, &result, sizeof(result));
+  }
+return {result_bits, fcsr};
 }
 
 void Alu::setFlags(bool carry, bool zero, bool negative, bool overflow) {
