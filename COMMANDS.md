@@ -71,10 +71,77 @@ The following options are provided **at VM startup** to configure processor mode
   - Logs cycle-by-cycle pipeline execution details to `pipeline_debug.log`.
 
 - `--schedule`
-  - Enables instruction scheduling (basic-block optimization).
-  - Helps reduce pipeline stalls in supported pipelined modes.
+  - Enables instruction scheduling before execution.
+  - The scheduler
+    - identifies basic blocks
+    - performs dependency analysis
+    - reorders independent instructions
+    - reduces pipeline stalls
 
 ### Example Usage
 
+- Single-cycle
+
 ```bash
-./riscv_simulator --mode 6 --debug --schedule
+./vm --mode 0
+```
+
+- Pipeline
+
+```bash
+./vm --mode 1
+```
+
+- Hazard Detection
+
+```bash
+./vm --mode 2
+```
+
+- Forwarding
+
+```bash
+./vm --mode 3
+```
+
+- Static Branch Prediction
+
+```bash
+./vm --mode 4
+```
+
+- Dynamic 1-bit Prediction
+
+```bash
+./vm --mode 5
+```
+
+- Dynamic 2-bit Prediction
+
+```bash
+./vm --mode 6
+```
+
+- BTB
+
+```bash
+./vm --mode 7
+```
+
+- Pipeline + Debugging
+
+```bash
+./vm --mode 7 --debug
+```
+
+- Pipeline + Scheduling
+
+```bash
+./vm --mode 7 --schedule
+```
+
+- Full Configuration
+
+```bash
+./vm --mode 7 --debug --schedule
+```
